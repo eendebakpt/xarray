@@ -143,7 +143,6 @@ def isnull(data):
         return isnat(data)
     elif dtypes.isdtype(scalar_type, ("real floating", "complex floating"), xp=xp):
         # float types use NaN for null
-        xp = get_array_namespace(data)
         return xp.isnan(data)
     elif dtypes.isdtype(scalar_type, ("bool", "integral"), xp=xp) or (
         isinstance(scalar_type, np.dtype)
