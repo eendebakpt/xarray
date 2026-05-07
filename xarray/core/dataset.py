@@ -199,6 +199,55 @@ _DATETIMEINDEX_COMPONENTS = [
 ]
 
 
+def _cartesian_grid_dim_sizes(
+    clean_index: pd.MultiIndex,
+) -> dict[str, int] | None:
+    """Return {level_name: size} in C-order (slowest → fastest) when *clean_index*
+    represents a full Cartesian product whose entries are stored in raster-scan
+    (row-major) order, otherwise return ``None``.
+
+    When the result is not ``None``, the data variable can be reshaped directly
+    with :meth:`Variable._unstack_once_full` instead of using the slower
+    fancy-index scatter in :meth:`Variable._unstack_once`.
+    """
+    level_sizes = [lev.size for lev in clean_index.levels]
+    n = len(clean_index)
+    if math.prod(level_sizes) != n:
+        return None  # not a full Cartesian product – may contain NaNs
+
+    codes = [np.asarray(c) for c in clean_index.codes]
+
+    # Determine the stride of each level (the run-length of the initial constant
+    # block), which also equals the C-order stride of that level in the flat array.
+    strides: list[int] = []
+    for code, size in zip(codes, level_sizes):
+        if size <= 1:
+            strides.append(n)
+            continue
+        first_change = int(np.argmax(code != code[0]))
+        if first_change == 0:
+            return None  # code changes on first element – not raster order
+        strides.append(first_change)
+
+    # Sort levels slowest → fastest (largest stride first)
+    perm = sorted(range(len(level_sizes)), key=lambda i: -strides[i])
+    sorted_sizes = [level_sizes[p] for p in perm]
+
+    # Verify that strides match the expected C-order strides and that codes are
+    # perfectly regular (no skipped or duplicated positions).
+    arange_n = np.arange(n)
+    for pos, p in enumerate(perm):
+        expected_stride = math.prod(sorted_sizes[pos + 1 :]) if pos + 1 < len(perm) else 1
+        if strides[p] != expected_stride:
+            return None
+        expected_code = (arange_n // expected_stride) % sorted_sizes[pos]
+        if not np.array_equal(codes[p], expected_code):
+            return None
+
+    names = clean_index.names
+    return {str(names[p]): level_sizes[p] for p in perm}
+
+
 class Dataset(
     DataWithCoords,
     DatasetAggregations,
@@ -5467,20 +5516,27 @@ class Dataset(
         for idx in new_indexes.values():
             variables.update(idx.create_variables(index_vars))
 
+        # Fast path: when the MultiIndex represents a full Cartesian product
+        # stored in raster (C) order, a plain reshape suffices – no fancy-index
+        # scatter, no NaN fill allocation.
+        dim_sizes = _cartesian_grid_dim_sizes(clean_index)
+
         for name, var in self.variables.items():
             if name not in index_vars:
                 if dim in var.dims:
-                    if isinstance(fill_value, Mapping):
-                        fill_value_ = fill_value.get(name, xrdtypes.NA)
+                    if dim_sizes is not None and not sparse:
+                        variables[name] = var._unstack_once_full(dim_sizes, dim)
                     else:
-                        fill_value_ = fill_value
-
-                    variables[name] = var._unstack_once(
-                        index=clean_index,
-                        dim=dim,
-                        fill_value=fill_value_,
-                        sparse=sparse,
-                    )
+                        if isinstance(fill_value, Mapping):
+                            fill_value_ = fill_value.get(name, xrdtypes.NA)
+                        else:
+                            fill_value_ = fill_value
+                        variables[name] = var._unstack_once(
+                            index=clean_index,
+                            dim=dim,
+                            fill_value=fill_value_,
+                            sparse=sparse,
+                        )
                 else:
                     variables[name] = var
 
