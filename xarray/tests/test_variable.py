@@ -642,6 +642,14 @@ class VariableSubclassobjects(NamedArraySubclassobjects, ABC):
                 assert source_ndarray(v.values) is source_ndarray(w.values)
         assert_identical(v, copy(v))
 
+    def test_copy_does_not_share_attrs_and_encoding(self) -> None:
+        v = self.cls("x", [0, 1], {"foo": "bar"}, {"dtype": "int16"})
+        for w in [v.copy(deep=False), v.copy(deep=True), copy(v), v._replace()]:
+            assert w.attrs == v.attrs
+            assert w.attrs is not v.attrs
+            assert w.encoding == v.encoding
+            assert w.encoding is not v.encoding
+
     def test_copy_deep_recursive(self) -> None:
         # GH:issue:7111
 
