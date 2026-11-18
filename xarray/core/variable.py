@@ -1213,12 +1213,11 @@ class Variable(
                     f"Data shape {ndata.shape} must match shape of object {self.shape}"
                 )
 
-        attrs = copy.deepcopy(self._attrs, memo) if deep else copy.copy(self._attrs)
-        encoding = (
-            copy.deepcopy(self._encoding, memo) if deep else copy.copy(self._encoding)
-        )
+        # note: dims is already an immutable tuple, and the constructor makes a
+        # shallow copy of attrs and encoding
+        attrs = copy.deepcopy(self._attrs, memo) if deep else self._attrs
+        encoding = copy.deepcopy(self._encoding, memo) if deep else self._encoding
 
-        # note: dims is already an immutable tuple
         return self._replace(data=ndata, attrs=attrs, encoding=encoding)
 
     @override
@@ -1230,16 +1229,18 @@ class Variable(
         encoding=_default,
     ) -> Self:
         if dims is _default:
-            dims = copy.copy(self._dims)
+            # dims is an immutable tuple
+            dims = self._dims
         if data is _default:
             # Only copy data when it is actually being changed.
             # Many callers (e.g. drop_encoding) only change encoding/attrs,
             # and a full data copy is expensive for large arrays.
             data = self._data
+        # the constructor makes a shallow copy of attrs and encoding
         if attrs is _default:
-            attrs = copy.copy(self._attrs)
+            attrs = self._attrs
         if encoding is _default:
-            encoding = copy.copy(self._encoding)
+            encoding = self._encoding
         return type(self)(dims, data, attrs, encoding, fastpath=True)
 
     def load(self, **kwargs) -> Self:
@@ -3282,8 +3283,9 @@ class IndexVariable(Variable[ShapeType_co, DType_co, DimType_co]):
                     f"Data shape {ndata.shape} must match shape of object {self.shape}"
                 )
 
-        attrs = copy.deepcopy(self._attrs) if deep else copy.copy(self._attrs)
-        encoding = copy.deepcopy(self._encoding) if deep else copy.copy(self._encoding)
+        # the constructor makes a shallow copy of attrs and encoding
+        attrs = copy.deepcopy(self._attrs) if deep else self._attrs
+        encoding = copy.deepcopy(self._encoding) if deep else self._encoding
 
         return self._replace(data=ndata, attrs=attrs, encoding=encoding)
 
